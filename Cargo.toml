@@ -9,6 +9,7 @@ members = [
     "candle-transformers",
     "candle-wasm-examples/*",
     "candle-wasm-tests",
+    "candle-optimisers",
     "tensor-tools",
 ]
 exclude = [
@@ -39,6 +40,7 @@ candle-flash-attn = { path = "./candle-flash-attn", version = "0.6.0" }
 candle-kernels = { path = "./candle-kernels", version = "0.6.0" }
 candle-metal-kernels = { path = "./candle-metal-kernels", version = "0.6.0" }
 candle-nn = { path = "./candle-nn", version = "0.6.0" }
+candle-optimisers = { path = "./candle-optimisers", version = "0.5.0" }
 candle-onnx = { path = "./candle-onnx", version = "0.6.0" }
 candle-transformers = { path = "./candle-transformers", version = "0.6.0" }
 clap = { version = "4.2.4", features = ["derive"] }

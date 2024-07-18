@@ -1,8 +1,11 @@
 /// A fast implementation of mamba for inference only.
 /// This is based on: https://github.com/LaurentMazare/mamba.rs
 use crate::models::with_tracing::{linear, linear_no_bias, Linear};
+
 use candle::{DType, Device, IndexOp, Module, Result, Tensor, D};
-use candle_nn::{RmsNorm, VarBuilder};
+use candle_nn::{loss, RmsNorm, VarBuilder};
+
+use candle_optimisers;
 
 const D_CONV: usize = 4;
 const D_STATE: usize = 16;
@@ -30,6 +33,7 @@ impl Config {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct State {
     pub hs: Vec<Tensor>,
     pub prev_xs: Vec<[Tensor; D_CONV]>,
@@ -178,10 +182,22 @@ pub struct Model {
     norm_f: RmsNorm,
     lm_head: Linear,
     dtype: DType,
+    //TODO: test new input and output state, needed for linesearch loss
+    //NOTE: theres got to be a better way..
+    pub input: Option<Tensor>,
+    pub state: State, //NOTE: super must be mut
+                      //output: Tensor,
+}
+// derive Model trait for LBFGS optimizer
+impl candle_optimisers::Trainable for Model {
+    fn loss(&mut self) -> Result<Tensor> {
+        //self.forward(&self.input, self.state)
+        self.forward_state()
+    }
 }
 
 impl Model {
-    pub fn new(cfg: &Config, vb: VarBuilder) -> Result<Self> {
+    pub fn new(cfg: &Config, vb: VarBuilder, state: State) -> Result<Self> {
         let embedding = candle_nn::embedding(cfg.vocab_size(), cfg.d_model, vb.pp("embedding"))?;
         let mut layers = Vec::with_capacity(cfg.n_layer);
         let vb_l = vb.pp("layers");
@@ -197,10 +213,26 @@ impl Model {
             norm_f,
             lm_head,
             dtype: vb.dtype(),
+            input: None,
+            state: state,
         })
     }
 
     pub fn forward(&self, input_ids: &Tensor, state: &mut State) -> Result<Tensor> {
+        let _b_size = input_ids.dims1()?;
+        let mut xs = self.embedding.forward(input_ids)?;
+        for layer in self.layers.iter() {
+            xs = layer.forward(&xs, state)?
+        }
+        state.pos += 1;
+        xs.apply(&self.norm_f)?.apply(&self.lm_head)
+    }
+
+    pub fn forward_state(&mut self) -> Result<Tensor> {
+        //TODO: propogate uninitialized error here
+        let input_ids = &self.input.clone().unwrap();
+        let state = &mut self.state;
+
         let _b_size = input_ids.dims1()?;
         let mut xs = self.embedding.forward(input_ids)?;
         for layer in self.layers.iter() {

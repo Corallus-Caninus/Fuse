@@ -286,7 +286,9 @@ fn main() -> Result<()> {
     let device = candle_examples::device(args.cpu)?;
     let dtype = DType::from_str(&args.dtype)?;
     let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
-    let model = Model::new(&config, vb.pp("backbone"))?;
+
+    let state = State::new(1, &config, dtype, &device)?;
+    let model = Model::new(&config, vb.pp("backbone"), state)?;
     println!("loaded the model in {:?}", start.elapsed());
 
     let mut pipeline = TextGeneration::new(
