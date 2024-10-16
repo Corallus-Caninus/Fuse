@@ -1,5 +1,5 @@
 # fuze
-toying around with L-BFGS. Currently using mamba-trainer in examples, soon to use gemma-recurrent to try to finetune interpret models locally for aider/ollama etc.
+toying around with L-BFGS. Currently using mamba-trainer in examples, soon to use gemma-recurrent to try to finetune models locally for aider/ollama etc.
 
 TODO: grab the AMD branch from candle and try to run on MI25
 
