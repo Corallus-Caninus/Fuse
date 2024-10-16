@@ -36,7 +36,8 @@ serde_json = { workspace = true }
 symphonia = { version = "0.5.3", features = ["all"], optional = true }
 tokenizers = { workspace = true, features = ["onig"] }
 cpal= { version = "0.15.2", optional = true }
-
+#candle-optimisers = { git = "https://github.com/KGrewal1/optimisers.git", version = "0.5.0", feature = "cuda" }
+candle-optimisers = {workspace = true}
 [dev-dependencies]
 anyhow = { workspace = true }
 byteorder = { workspace = true }

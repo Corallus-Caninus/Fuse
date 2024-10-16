@@ -44,6 +44,15 @@ impl Var {
         }
     }
 
+    pub fn from_tensor_and_free(t: Tensor) -> Result<Self> {
+        if t.is_variable() {
+            Ok(Self(t))
+        } else {
+            let inner = t.make_var()?;
+            Ok(Self(inner))
+        }
+    }
+
     pub fn rand_f64<S: Into<Shape>>(
         lo: f64,
         up: f64,
@@ -129,6 +138,29 @@ impl Var {
     /// mutability is used.
     pub fn set(&self, src: &Tensor) -> Result<()> {
         if self.same_storage(src) {
+            let msg = "cannot set a variable to a tensor that is derived from its value";
+            Err(Error::CannotSetVar { msg }.bt())?
+        }
+        let (mut dst, layout) = self.storage_mut_and_layout();
+        if !layout.is_contiguous() {
+            let msg = "cannot set a non-contiguous variable";
+            Err(Error::CannotSetVar { msg }.bt())?
+        }
+        let (src, src_l) = src.storage_and_layout();
+        if layout.shape() != src_l.shape() {
+            Err(Error::ShapeMismatchBinaryOp {
+                lhs: layout.shape().clone(),
+                rhs: src_l.shape().clone(),
+                op: "set",
+            }
+            .bt())?
+        }
+        src.copy_strided_src(&mut dst, layout.start_offset(), src_l)?;
+        Ok(())
+    }
+    /// Sets the content of the inner tensor by moving the source in.
+    pub fn set_and_free(&self, src: Tensor) -> Result<()> {
+        if self.same_storage(&src) {
             let msg = "cannot set a variable to a tensor that is derived from its value";
             Err(Error::CannotSetVar { msg }.bt())?
         }

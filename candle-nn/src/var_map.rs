@@ -26,6 +26,17 @@ impl VarMap {
         tensor_data.values().map(|c| c.clone()).collect::<Vec<_>>()
     }
 
+    pub fn all_vars_copy(&self) -> Result<Vec<Var>> {
+        let tensor_data = self.data.lock().unwrap();
+        #[allow(clippy::map_clone)]
+        let res = tensor_data.values().map(|c| c.copy()).collect::<Vec<_>>();
+        let res = res
+            .into_iter()
+            .map(|res| Var::from_tensor_and_free(res.unwrap()).unwrap())
+            .collect::<Vec<Var>>();
+        Ok(res)
+    }
+
     /// Save the map in the safetensors format.
     pub fn save<P: AsRef<std::path::Path>>(&self, path: P) -> Result<()> {
         let tensor_data = self.data.lock().unwrap();
@@ -46,6 +57,22 @@ impl VarMap {
             let data = data.load(name, var.device())?;
             if let Err(err) = var.set(&data) {
                 candle::bail!("error setting {name} using data from {path:?}: {err}",)
+            }
+        }
+        Ok(())
+    }
+
+    /// Load some values from a safetensors file and modify the existing variables to have these
+    /// values.
+    ///
+    /// Note that values for variables that are currently not in the map are not kept.
+    pub fn load_multi<P: AsRef<std::path::Path>>(&mut self, paths: &[P]) -> Result<()> {
+        let data = unsafe { candle::safetensors::MmapedSafetensors::multi(paths)? };
+        let mut tensor_data = self.data.lock().unwrap();
+        for (name, var) in tensor_data.iter_mut() {
+            let data = data.load(name, var.device())?;
+            if let Err(err) = var.set(&data) {
+                candle::bail!("error setting {name} (TODO: print filenames) {err}",)
             }
         }
         Ok(())

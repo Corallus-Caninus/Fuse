@@ -10,6 +10,7 @@ pub enum Sampling {
     TopKThenTopP { k: usize, p: f64, temperature: f64 },
 }
 
+#[derive(Clone)]
 pub struct LogitsProcessor {
     rng: rand::rngs::StdRng,
     sampling: Sampling,

@@ -10,6 +10,8 @@ use rand::prelude::*;
 
 use candle::{DType, Result, Tensor, D};
 use candle_nn::{loss, ops, Conv2d, Linear, Module, ModuleT, Optimizer, VarBuilder, VarMap};
+use candle_optimisers;
+use candle_optimisers::*;
 
 const IMAGE_DIM: usize = 784;
 const LABELS: usize = 10;
@@ -98,6 +100,13 @@ impl ConvNet {
         self.dropout.forward_t(&xs, train)?.apply(&self.fc2)
     }
 }
+//impl optimisers::Model for ConvNet
+//{
+//TODO: closure this so we can train LBFGS
+//fn loss(&self) -> CResult<Tensor>{
+//  self.loss
+//}
+//}
 
 struct TrainingArgs {
     learning_rate: f64,
@@ -127,11 +136,12 @@ fn training_loop_cnn(
         varmap.load(load)?
     }
 
-    let adamw_params = candle_nn::ParamsAdamW {
+    let lbfgs_params = candle_optimisers::lbfgs::ParamsLBFGS {
         lr: args.learning_rate,
+        history_size: 100,
         ..Default::default()
     };
-    let mut opt = candle_nn::AdamW::new(varmap.all_vars(), adamw_params)?;
+    let mut opt = candle_optimisers::lbfgs::Lbfgs::new(varmap.all_vars(), lbfgs_params, model)?;
     let test_images = m.test_images.to_device(&dev)?;
     let test_labels = m.test_labels.to_dtype(DType::U32)?.to_device(&dev)?;
     let n_batches = train_images.dim(0)? / BSIZE;

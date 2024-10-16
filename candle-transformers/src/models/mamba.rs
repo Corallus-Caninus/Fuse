@@ -46,7 +46,7 @@ impl State {
         let mut prev_xs = Vec::with_capacity(cfg.n_layer);
         for _i in 0..cfg.n_layer {
             let h = Tensor::zeros((batch_size, cfg.d_inner(), D_STATE), dtype, device)?;
-            let x = Tensor::zeros((batch_size, cfg.d_inner()), dtype, device)?;
+            let x = &Tensor::zeros((batch_size, cfg.d_inner()), dtype, device)?;
             hs.push(h);
             prev_xs.push([x.clone(), x.clone(), x.clone(), x.clone()]);
         }
@@ -56,6 +56,7 @@ impl State {
             pos: 0,
         })
     }
+    //TODO: reset state method
 }
 
 #[derive(Clone, Debug)]
@@ -110,7 +111,7 @@ impl MambaBlock {
         let (b_sz, _dim) = xs.dims2()?;
         let li = self.layer_index;
         let mut xs = xs.apply(&self.in_proj)?.chunk(2, D::Minus1)?;
-        let proj_for_silu = xs.remove(1);
+        let proj_for_sigmoid = xs.remove(1);
         state.prev_xs[li][state.pos % D_CONV] = xs.remove(0);
         let mut proj_for_conv = self.conv1d_bias.broadcast_as((b_sz, self.d_inner))?;
         for d_c in 0..D_CONV {
@@ -118,7 +119,7 @@ impl MambaBlock {
                 + self.conv1d_weights[d_c]
                     .broadcast_mul(&state.prev_xs[li][(d_c + 1 + state.pos) % D_CONV])?)?;
         }
-        let proj_for_conv = candle_nn::ops::silu(&proj_for_conv)?;
+        let proj_for_conv = candle_nn::ops::sigmoid(&proj_for_conv)?;
         // SSM + Selection, we're doing inference here so only need the last step of
         // the sequence.
         // Algorithm 3.2 on page 6, https://arxiv.org/pdf/2312.00752.pdf
@@ -151,7 +152,7 @@ impl MambaBlock {
             .squeeze(D::Minus1)?
             + proj_for_conv.broadcast_mul(&d)?)?;
 
-        let ys = (ss * candle_nn::ops::silu(&proj_for_silu))?;
+        let ys = (ss * candle_nn::ops::sigmoid(&proj_for_sigmoid))?;
         ys.apply(&self.out_proj)
     }
 }
@@ -164,7 +165,8 @@ pub struct ResidualBlock {
 
 impl ResidualBlock {
     pub fn new(layer_index: usize, cfg: &Config, vb: VarBuilder) -> Result<Self> {
-        let norm = candle_nn::rms_norm(cfg.d_model, 1e-5, vb.pp("norm"))?;
+        let norm = candle_nn::rms_norm(cfg.d_model, 1e-10, vb.pp("norm"))?;
+        // let norm = candle_nn::rms_norm(cfg.d_model, 1e-10, vb.pp("norm"))?;
         let mixer = MambaBlock::new(layer_index, cfg, vb.pp("mixer"))?;
         Ok(Self { mixer, norm })
     }
@@ -174,26 +176,20 @@ impl ResidualBlock {
     }
 }
 
-// https://github.com/johnma2006/mamba-minimal/blob/61f01953ca153f8c4a850d7111beecbf4be9cee1/model.py#L56
+// https://github.com/johnma2006/mamba-minimal/blob/61f01953ca153f8c4a850d751beecbf4be9cee1/model.py#L56
 #[derive(Clone, Debug)]
 pub struct Model {
     embedding: candle_nn::Embedding,
-    layers: Vec<ResidualBlock>,
+    pub layers: Vec<ResidualBlock>,
     norm_f: RmsNorm,
     lm_head: Linear,
     dtype: DType,
-    //TODO: test new input and output state, needed for linesearch loss
+    //NOTE: internalized state for optimizers
     //NOTE: theres got to be a better way..
     pub input: Option<Tensor>,
-    pub state: State, //NOTE: super must be mut
-                      //output: Tensor,
-}
-// derive Model trait for LBFGS optimizer
-impl candle_optimisers::Trainable for Model {
-    fn loss(&mut self) -> Result<Tensor> {
-        //self.forward(&self.input, self.state)
-        self.forward_state()
-    }
+    pub label: Option<Tensor>,
+    pub output: Option<Tensor>,
+    pub state: State,
 }
 
 impl Model {
@@ -205,7 +201,8 @@ impl Model {
             let layer = ResidualBlock::new(layer_idx, cfg, vb_l.pp(layer_idx))?;
             layers.push(layer)
         }
-        let norm_f = candle_nn::rms_norm(cfg.d_model, 1e-5, vb.pp("norm_f"))?;
+        // let norm_f = candle_nn::rms_norm(cfg.d_model, 1e-10, vb.pp("norm_f"))?;
+        let norm_f = candle_nn::rms_norm(cfg.d_model, 1e-10, vb.pp("norm_f"))?;
         let lm_head = Linear::from_weights(embedding.embeddings().clone(), None);
         Ok(Self {
             embedding,
@@ -213,11 +210,14 @@ impl Model {
             norm_f,
             lm_head,
             dtype: vb.dtype(),
-            input: None,
+            input: None, //NOTE: dont need this now but keep since we are keeping black box state here anyways
+            output: None,
+            label: None,
             state: state,
         })
     }
 
+    ///Forward propagate the model using the given input and state
     pub fn forward(&self, input_ids: &Tensor, state: &mut State) -> Result<Tensor> {
         let _b_size = input_ids.dims1()?;
         let mut xs = self.embedding.forward(input_ids)?;
@@ -228,21 +228,40 @@ impl Model {
         xs.apply(&self.norm_f)?.apply(&self.lm_head)
     }
 
+    ///Forward propagate the model using the internalized input and state
     pub fn forward_state(&mut self) -> Result<Tensor> {
         //TODO: propogate uninitialized error here
-        let input_ids = &self.input.clone().unwrap();
-        let state = &mut self.state;
+        let input_ids = &self.input.as_ref().unwrap();
+        //let state = &mut self.state;
 
-        let _b_size = input_ids.dims1()?;
+        //let _b_size = input_ids.dims1()?;
         let mut xs = self.embedding.forward(input_ids)?;
         for layer in self.layers.iter() {
-            xs = layer.forward(&xs, state)?
+            xs = layer.forward(&xs, &mut self.state)?
+            //xs = layer.forward(&xs)?
         }
-        state.pos += 1;
+        //self.state = state.clone();
+        self.state.pos += 1;
         xs.apply(&self.norm_f)?.apply(&self.lm_head)
     }
 
     pub fn dtype(&self) -> DType {
         self.dtype
+    }
+    pub fn forward_state_static(&mut self) -> Result<Tensor> {
+        //TODO: propogate uninitialized error here
+        let input_ids = &self.input.clone().unwrap();
+        let state = self.state.clone(); //TODO: freeze state
+
+        //let _b_size = input_ids.dims1()?;
+        let mut xs = self.embedding.forward(input_ids)?;
+        for layer in self.layers.iter() {
+            xs = layer.forward(&xs, &mut self.state)?
+            //xs = layer.forward(&xs)?
+        }
+        //self.state = state.clone();
+        //self.state.pos += 1;
+        self.state = state;
+        xs.apply(&self.norm_f)?.apply(&self.lm_head)
     }
 }

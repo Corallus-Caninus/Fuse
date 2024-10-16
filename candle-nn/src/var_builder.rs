@@ -27,6 +27,7 @@ impl<'a, B: Backend> Clone for VarBuilderArgs<'a, B> {
     }
 }
 
+//TODO: dont use trait generics this is a unoptimizable indirection for no reason
 /// A simple `VarBuilder`, this is less generic than `VarBuilderArgs` but should cover most common
 /// use cases.
 pub type VarBuilder<'a> = VarBuilderArgs<'a, Box<dyn SimpleBackend + 'a>>;
