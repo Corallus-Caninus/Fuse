@@ -1,3 +1,9 @@
+# fuze
+toying around with L-BFGS. Currently using mamba-trainer in examples, soon to use gemma-recurrent to try to finetune interpret models locally for aider/ollama etc.
+
+TODO: grab the AMD branch from candle and try to run on MI25
+TODO: refactor example/mamba-trainer optimizer specific code into L-BFGS (preferably create a new optimizer L-BFGS-NCR (non-convex best effort and recoverable) or something)
+
 # candle
 [![discord server](https://dcbadge.vercel.app/api/server/hugging-face-879548962464493619)](https://discord.gg/hugging-face-879548962464493619)
 [![Latest version](https://img.shields.io/crates/v/candle-core.svg)](https://crates.io/crates/candle-core)
