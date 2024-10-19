@@ -72,7 +72,9 @@ impl Trainable for Trainer {
         println!("tokens len: {}", tokens.len());
         if tokens.len() > 2 {
             // pred_tokens = tokens.len()/4;
-            pred_tokens = tokens.len() - 1 as usize; // at least conv_d
+//            pred_tokens = tokens.len() - 10 as usize; // at least conv_d
+//            pred_tokens = tokens.len() - 1;
+            pred_tokens = 1;
                                                      //            pred_tokens = tokens.len() - (  tokens.len() as f32 *0.80) as usize; // at least conv_d
         } else {
             pred_tokens = 1;
@@ -264,12 +266,13 @@ impl Trainer {
         let device = candle_examples::device(args.cpu)?;
         let dtype = DType::from_str(&args.dtype)?;
         //load the weight tensors for training
-        //let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
+//        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
         let mut vm = VarMap::new();
+        vm.load_multi(&filenames)?;
         let vb = VarBuilder::from_varmap(&vm, dtype, &device);
         //TODO: extract to initialization routine we need this alot in train
-        let state = State::new(1, &config, dtype, &device)?;
-        let mut model = Model::new(&config, vb.pp("backbone"), state)?;
+        let state = State::new(1, &read_config, dtype, &device)?;
+        let mut model = Model::new(&read_config, vb.pp("backbone"), state)?;
         //vm.load_multi(&filenames)?;
         println!("loaded the model in {:?}", start.elapsed());
         println!("loaded: {} trainable Tensors", vm.all_vars().len());
@@ -279,7 +282,7 @@ impl Trainer {
             model,
             vars: vm,
             data: vec![],
-            config,
+            config: read_config,
             tokenizer: TokenOutputStream::new(tokenizer),
             logits_processor,
             repeat_penalty,
@@ -325,7 +328,7 @@ impl Trainer {
             //            lr: 0.1,
             history_size: 20,
             line_search: Some(lbfgs::LineSearch::StrongWolfe(1e-4, 0.9, 1e-13)),
-            //            weight_decay: Some(1e-9), // NOTE: this must be critically dampened with the learning rate
+                        weight_decay: Some(1e-9), // NOTE: this must be critically dampened with the learning rate
             ..Default::default()
         };
         let selfi = &mut self.clone();
@@ -341,7 +344,7 @@ impl Trainer {
         let mut prev_loss = f32::MAX;
         let mut prev_loss = Tensor::new(&[prev_loss], &self.device)?;
         //        for i in 0..3*lbfgs_opt.params.history_size {
-        for i in 0..25 {
+        for i in 0..1 {
             //        loop {
             //                    for i in 0..5{
             let res = lbfgs_opt.backward_step(&mut loss).unwrap();
@@ -406,13 +409,13 @@ impl Trainer {
         }
         println!("\t \t \t final loss: {}", loss.clone());
         //        //TODO: we can keep the hessian if we stop early when loss isnt increasing
-        //                lbfgs_opt.s_hist.clear();
-        //        lbfgs_opt.first = true;
+//                        lbfgs_opt.s_hist.clear();
+//                lbfgs_opt.first = true;
         lbfgs_opt.next_grad = None;
         println!("s_hist: {}", lbfgs_opt.s_hist.len());
         converged = false;
-        //                lbfgs_opt.last_grad = None;
-        //                lbfgs_opt.last_step = None;
+//                        lbfgs_opt.last_grad = None;
+//                        lbfgs_opt.last_step = None;
         //                //selfi.model.layers.clear();
         //TODO: move this into each match above and dont break the loop unless error is 0
         if reset {
@@ -426,13 +429,13 @@ impl Trainer {
                     // Shuffle the iterable and take the first `num_entries`
                     //TODO: extract a hyperparameter and ensure we randomly select for all_vars
                     let mut shuffled_iterable = self.vars.all_vars();
-                    let num_entries = (shuffled_iterable.len() as f32 * 0.1) as usize;
+                    let num_entries = (shuffled_iterable.len() as f32 * 0.9) as usize;
                     shuffled_iterable.shuffle(&mut rng);
 
                     shuffled_iterable
                         .into_iter()
                         .take(num_entries)
-                        .for_each(|x| {
+                        .for_each(|mut x| {
                             //let mut sparse = &x.clone().as_tensor().broadcast_mul(&Tensor::new(0. as f32, &self.device).unwrap()).unwrap();
                             let mut vec_tens = x.flatten_all().unwrap().to_vec1::<f32>().unwrap();
                             for i in 0..vec_tens.len() * 0.1 as usize {
@@ -444,7 +447,7 @@ impl Trainer {
                                 //    let random_float: f32 = 1. as f32;
                                 //    let random_float: f32 = rng.gen();
                                 vec_tens[first_idx] = random_float;
-                                //                                                                                       vec_tens[first_idx] =              rng.gen_range::<f32,f32>(-1 as f32..1 as f32) as f32;
+//                                //                                                                                       vec_tens[first_idx] =              rng.gen_range::<f32,f32>(-1 as f32..1 as f32) as f32;
                                 //                                vec_tens[first_idx] = 1. as f32;
 
                                 //'kor::new(&[0. as f32], &self.device)?;
@@ -459,13 +462,14 @@ impl Trainer {
                             //                                x = Tensor::new(0., &self.device).unwrap();
                             //                            });
                             x.set(sparse);
+                            x = Var::from_tensor(sparse).unwrap();
                             println!("shape: {:?}", x.as_tensor());
                             //println!("got: {}", x);
                         });
                     //CTMFIT
-                    //                                        lbfgs_opt.s_hist.clear();
-                    //                                        lbfgs_opt.last_grad = None;
-                    //                                        lbfgs_opt.last_step = None;
+                                                            lbfgs_opt.s_hist.clear();
+                                                            lbfgs_opt.last_grad = None;
+                                                            lbfgs_opt.last_step = None;
                     lbfgs_opt.next_grad = None;
                     lbfgs_opt.first = true;
                     //                    println!("-------------------------------------CLEARING Stuck Hessian {}..----------------------------------------------------", lbfgs_state.s_hist.len());
@@ -473,6 +477,7 @@ impl Trainer {
                 }
                 //                lbfgs_state.s_hist.pop_back();
             }
+//return         Ok((loss.copy()?, None))
         }
         let mut lbfgs_state = lbfgs_opt.save_state();
         //        lbfgs_state.s_hist.clear();
@@ -756,6 +761,7 @@ fn lines_from_file(filename: impl AsRef<Path>) -> Vec<String> {
         .as_bytes()
         //TODO: this should be by tokens so we dont get memory allocation variance on different samples
         .chunks(500)
+//        .step_by(50)
         .map(|chunk| String::from_utf8_lossy(chunk).into_owned())
         .collect()
     //    let buf = BufReader::new(file);
