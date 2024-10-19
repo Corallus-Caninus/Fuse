@@ -1,3 +1,5 @@
 { pkgs ? import <nixpkgs> {} }:
 
-pkgs
+pkgs.mkShell {
+  buildInputs = [ pkgs.pkg-config pkgs.openssl ];
+}
