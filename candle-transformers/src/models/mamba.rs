@@ -111,7 +111,7 @@ impl MambaBlock {
         let (b_sz, _dim) = xs.dims2()?;
         let li = self.layer_index;
         let mut xs = xs.apply(&self.in_proj)?.chunk(2, D::Minus1)?;
-        let proj_for_sigmoid = xs.remove(1);
+        let proj_for_silu = xs.remove(1);
         state.prev_xs[li][state.pos % D_CONV] = xs.remove(0);
         let mut proj_for_conv = self.conv1d_bias.broadcast_as((b_sz, self.d_inner))?;
         for d_c in 0..D_CONV {
@@ -119,7 +119,7 @@ impl MambaBlock {
                 + self.conv1d_weights[d_c]
                     .broadcast_mul(&state.prev_xs[li][(d_c + 1 + state.pos) % D_CONV])?)?;
         }
-        let proj_for_conv = candle_nn::ops::sigmoid(&proj_for_conv)?;
+        let proj_for_conv = candle_nn::ops::silu(&proj_for_conv)?;
         // SSM + Selection, we're doing inference here so only need the last step of
         // the sequence.
         // Algorithm 3.2 on page 6, https://arxiv.org/pdf/2312.00752.pdf
@@ -152,7 +152,7 @@ impl MambaBlock {
             .squeeze(D::Minus1)?
             + proj_for_conv.broadcast_mul(&d)?)?;
 
-        let ys = (ss * candle_nn::ops::sigmoid(&proj_for_sigmoid))?;
+        let ys = (ss * candle_nn::ops::silu(&proj_for_silu))?;
         ys.apply(&self.out_proj)
     }
 }
@@ -165,7 +165,7 @@ pub struct ResidualBlock {
 
 impl ResidualBlock {
     pub fn new(layer_index: usize, cfg: &Config, vb: VarBuilder) -> Result<Self> {
-        let norm = candle_nn::rms_norm(cfg.d_model, 1e-10, vb.pp("norm"))?;
+        let norm = candle_nn::rms_norm(cfg.d_model, 1e-5, vb.pp("norm"))?;
         // let norm = candle_nn::rms_norm(cfg.d_model, 1e-10, vb.pp("norm"))?;
         let mixer = MambaBlock::new(layer_index, cfg, vb.pp("mixer"))?;
         Ok(Self { mixer, norm })
@@ -201,8 +201,8 @@ impl Model {
             let layer = ResidualBlock::new(layer_idx, cfg, vb_l.pp(layer_idx))?;
             layers.push(layer)
         }
-        // let norm_f = candle_nn::rms_norm(cfg.d_model, 1e-10, vb.pp("norm_f"))?;
-        let norm_f = candle_nn::rms_norm(cfg.d_model, 1e-10, vb.pp("norm_f"))?;
+        // let norm_f = candle_nn::rms_norm(cfg.d_model, 1e-5, vb.pp("norm_f"))?;
+        let norm_f = candle_nn::rms_norm(cfg.d_model, 1e-5, vb.pp("norm_f"))?;
         let lm_head = Linear::from_weights(embedding.embeddings().clone(), None);
         Ok(Self {
             embedding,

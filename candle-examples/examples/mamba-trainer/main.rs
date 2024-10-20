@@ -27,6 +27,7 @@ use candle_transformers::generation::LogitsProcessor;
 use hf_hub::{api::sync::Api, Repo, RepoType};
 use tokenizers::Tokenizer;
 
+//TODO: NEED TO REDUCE CLONES!!! REFACTOR THIS TO MAKE IT MORE ORGANIZED, THEN REMOVE CLONING UNLESS ITS OF ARCs (ALSO CHECK OPTIMISERS FOR COPYs!)
 #[derive(Clone)]
 struct Trainer {
     pub model: Model,
@@ -44,7 +45,6 @@ struct Trainer {
 impl Trainable for Trainer {
     //TODO: make this leaner but first ensure recurrent mode state is correct for loss calc
     fn loss(&mut self) -> CResult<Tensor> {
-        // println!("data: {}", self.data.last().unwrap());
         self.reset_state().unwrap();
         use std::io::Write;
         self.tokenizer.clear();
@@ -60,22 +60,14 @@ impl Trainable for Trainer {
             .to_vec();
         let orig_token_len = tokens.len() as f32;
         let orig_token_len = Tensor::new(&[orig_token_len], &self.device)?.squeeze(0)?;
-        //        let eos_token = match self.tokenizer.get_token("<|endoftext|>") {
-        //            Some(token) => token,
-        //            //None => anyhow::bail!("cannot find the </s> token"),
-        //            None => panic!("cannot find the /s token!"),
-        //        };
         let mut next_logits = None;
         let label_token = tokens.last().unwrap();
         //TODO: this should be determined in the dataset chunk function
         let mut pred_tokens = 0;
         println!("tokens len: {}", tokens.len());
         if tokens.len() > 2 {
-            // pred_tokens = tokens.len()/4;
-//            pred_tokens = tokens.len() - 10 as usize; // at least conv_d
-//            pred_tokens = tokens.len() - 1;
-            pred_tokens = 1;
-                                                     //            pred_tokens = tokens.len() - (  tokens.len() as f32 *0.80) as usize; // at least conv_d
+            pred_tokens = tokens.len() - 1;
+//            pred_tokens = 1;
         } else {
             pred_tokens = 1;
         }
@@ -86,7 +78,6 @@ impl Trainable for Trainer {
             .take(pred_tokens)
             .collect::<Vec<&u32>>();
 
-        //TODO: if we do it like this without parallel conv, we need to backprop every token otherwise this is likea liquid time-series network
         for &t in tokens.iter().take(tokens.len() - pred_tokens) {
             let input = Tensor::new(&[t], &self.device)?;
             self.model.input = Some(input.clone());
@@ -211,7 +202,7 @@ impl Trainer {
         );
         println!(
             "temp: {:.2} repeat-penalty: {:.2} repeat-last-n: {}",
-            args.temperature.unwrap_or(0.),
+            args.temperature.unwrap_or(1.),
             args.repeat_penalty,
             args.repeat_last_n
         );
@@ -245,6 +236,7 @@ impl Trainer {
             }
         };
         println!("retrieved the files in {:?}", start.elapsed());
+        println!("retrieved files: {:?}", filenames);
         let tokenizer = Tokenizer::from_file(tokenizer_filename).map_err(E::msg)?;
 
         let start = std::time::Instant::now();
@@ -268,14 +260,14 @@ impl Trainer {
         //load the weight tensors for training
 //        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
         let mut vm = VarMap::new();
-        vm.load_multi(&filenames)?;
-        let vb = VarBuilder::from_varmap(&vm, dtype, &device);
+        let mut vb = VarBuilder::from_varmap(&vm, dtype, &device);
         //TODO: extract to initialization routine we need this alot in train
         let state = State::new(1, &read_config, dtype, &device)?;
         let mut model = Model::new(&read_config, vb.pp("backbone"), state)?;
+        vm.load_multi(&filenames)?;
         //vm.load_multi(&filenames)?;
         println!("loaded the model in {:?}", start.elapsed());
-        println!("loaded: {} trainable Tensors", vm.all_vars().len());
+//        println!("loaded: {:?} trainable Tensors", vm.all_vars());
 
         let logits_processor = LogitsProcessor::new(seed, temp, top_p);
         Ok(Self {
@@ -602,6 +594,7 @@ impl Trainer {
             }
         }
         std::io::stdout().flush()?;
+        self.tokenizer.clear();
 
         let start_gen = std::time::Instant::now();
         for _ in 0..sample_len {
@@ -630,6 +623,7 @@ impl Trainer {
                 print!("\t {t}");
                 std::io::stdout().flush()?;
             }
+else{ println!("[{next_token}]");}
 
             let input = Tensor::new(&[next_token], &self.device)?;
             self.model.input = Some(input);
@@ -782,6 +776,7 @@ fn main() -> Result<()> {
     let mut i = 1;
     let mut converged = false;
     let mut learner = Trainer::new()?;
+        learner.run("mamba is the", 20);
     let mut model = learner.model.clone();
     let mut varmap = learner.vars.clone();
     for mut j in 1..11 * prompts.len() {
@@ -792,7 +787,7 @@ fn main() -> Result<()> {
         learner.data.rotate_left(j);
         opt_state = learner.train(opt_state.clone(), 10, converged)?.1;
         i = j;
-        //learner.run("mamba is a", 20);
+        learner.run("mamba is a", 20);
         println!("done training!");
         //learner.data.rotate_right(1);
         //let err = learner.run_trained().unwrap();
