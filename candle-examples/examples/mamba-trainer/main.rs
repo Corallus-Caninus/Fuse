@@ -447,7 +447,6 @@ let device = self.clone().device;
         Ok(())
     }
     fn run(&mut self, prompt: &str, sample_len: usize) -> Result<()> {
-println!("in run routine");
         use std::io::Write;
         self.tokenizer.clear();
         let dtype = DType::F32;
@@ -508,7 +507,6 @@ println!("EOS");
             }
 
             let input = Tensor::new(&[next_token], &self.device).unwrap().unsqueeze(0).unwrap();
-//            self.model.input = Some(input);
             next_logits = Some(self.model.forward(&input.clone()).unwrap().squeeze(0).unwrap());
         }
         let dt = start_gen.elapsed();
