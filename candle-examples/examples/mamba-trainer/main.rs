@@ -11,7 +11,6 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use rand::Rng;
 
-//use candle_transformers::models::mamba::{Config, Model, State};
 mod model;
 use model::{Config, Model};
 use std::cell::Ref;
@@ -28,6 +27,7 @@ use candle_transformers::generation::LogitsProcessor;
 use hf_hub::{api::sync::Api, Repo, RepoType};
 use tokenizers::Tokenizer;
 
+//TODO: refactor dtype to use loaded model. currently only full precision.
 #[derive(Clone)]
 struct Trainer {
     pub model: Model,
@@ -46,7 +46,6 @@ impl Trainable for Trainer {
     fn loss(&mut self) -> CResult<Tensor> {
         use std::io::Write;
         self.tokenizer.clear();
-        //        let dtype = self.model.dtype();
         let dtype = DType::F32;
 
         let mut tokens = self
@@ -77,9 +76,6 @@ impl Trainable for Trainer {
         let mut prediction_tokens = vec![];
         for &t in tokens.iter().take(tokens.len() - pred_tokens) {
             prediction_tokens.push(t);
-            //println!("forward propagated mamba!");
-            //
-            //            next_logits = Some(logits);
             if let Some(t) = self.tokenizer.next_token(t)? {
                 print!("|{t}|")
             }
@@ -91,18 +87,12 @@ impl Trainable for Trainer {
         let mut loss = Tensor::new(&[0.0], &self.device)?
             .to_dtype(dtype)?
             .squeeze(0)?;
-        //            .squeeze(0)?;
         let mut iter = 0 as f32;
         for label_token in label_tokens.into_iter().rev() {
             let input = Tensor::new(prediction_tokens.as_slice(), &self.device)?.unsqueeze(0)?;
             let logits = self.model.forward(&input.clone())?.squeeze(0)?;
 
             iter += 1.;
-            let itert = Tensor::new(&[iter], &self.device)?.squeeze(0);
-            //            let logits = match next_logits.as_ref() {
-            //                Some(logits) => logits.to_dtype(dtype)?,
-            //                None => panic!("cannot train on an empty prompt"),
-            //            };
             let pred_logits = logits.clone().to_dtype(dtype)?;
 
             let next_token = self
@@ -119,8 +109,6 @@ impl Trainable for Trainer {
 
             loss = (loss + candle_nn::loss::cross_entropy(&pred_logits, &label)?)?;
             prediction_tokens.push(next_token.clone());
-            //            self.model.input = Some(input.clone());
-            //            let logits = self.model.forward(&input.clone())?;
             next_logits = Some(logits);
         }
 
@@ -132,7 +120,6 @@ impl Trainable for Trainer {
             loss = Tensor::new(&[f32::MAX], &self.device)?
                 .to_dtype(dtype)
                 .unwrap();
-            //                .squeeze(0)?;
         }
         //TODO: EXTRACT TO LBFGS
         return Ok(loss);
@@ -207,12 +194,13 @@ impl Trainer {
         let start = std::time::Instant::now();
 
         let read_config: Config = serde_json::from_slice(&std::fs::read(config_filename)?)?;
-        let config: Config = Config {
-            d_model: 40,
-            n_layer: 40,
-            vocab_size: read_config.vocab_size,
-            pad_vocab_size_multiple: read_config.pad_vocab_size_multiple,
-        };
+        //NOTE: use this config instead to initialize the model from scratch for pre-training!
+        //        let config: Config = Config {
+        //            d_model: 40,
+        //            n_layer: 40,
+        //            vocab_size: read_config.vocab_size,
+        //            pad_vocab_size_multiple: read_config.pad_vocab_size_multiple,
+        //        };
 
         let device = candle_examples::device(args.cpu)?;
         let dtype = DType::from_str(&args.dtype)?;
@@ -323,6 +311,8 @@ impl Trainer {
         converged = false;
 
         //TODO: EXTRACT TO LBFGS
+        //Data Decay routine: (randomize a subset of the model. Can be very lossy but will recover a
+        //model with a persistently vanished gradient.
         if reset {
             println!("RESET");
             let mut rng = rand::thread_rng();
@@ -409,16 +399,6 @@ impl Trainer {
                 None => anyhow::bail!("cannot work on an empty prompt"),
             };
             let logits = logits.squeeze(0).unwrap().to_dtype(dtype).unwrap();
-            //            let logits = if self.repeat_penalty == 1. {
-            //                logits
-            //            } else {
-            //                let start_at = tokens.len().saturating_sub(self.repeat_last_n);
-            //                candle_transformers::utils::apply_repeat_penalty(
-            //                    &logits,
-            //                    self.repeat_penalty,
-            //                    &tokens[start_at..],
-            //                ).unwrap()
-            //            };
             let next_token = self.logits_processor.sample(&logits).unwrap();
             tokens.push(next_token);
             generated_tokens += 1;
