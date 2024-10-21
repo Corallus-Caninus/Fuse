@@ -127,14 +127,15 @@ impl Trainable for Trainer {
 
         tokens.clear();
         self.tokenizer.clear();
+//TODO: EXTRACT TO LBFGS
         if loss.as_ref().clone().to_scalar::<f32>()?.is_nan() {
             println!("nan");
-
             loss = Tensor::new(&[f32::MAX], &self.device)?
                 .to_dtype(dtype)
                 .unwrap()
                 .squeeze(0)?;
         }
+//TODO: EXTRACT TO LBFGS
         return Ok(loss);
     }
 }
@@ -336,6 +337,7 @@ impl Trainer {
         println!("s_hist: {}", lbfgs_opt.s_hist.len());
         converged = false;
 
+//TODO: EXTRACT TO LBFGS
         if reset {
             println!("RESET");
             if vanished {
@@ -376,6 +378,7 @@ impl Trainer {
                 }
             }
         }
+//TODO: EXTRACT TO LBFGS
         let mut lbfgs_state = lbfgs_opt.save_state();
 
         Ok((loss.copy()?, Some(lbfgs_state)))
