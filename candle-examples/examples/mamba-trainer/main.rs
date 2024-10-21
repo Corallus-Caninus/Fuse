@@ -447,6 +447,7 @@ let device = self.clone().device;
         Ok(())
     }
     fn run(&mut self, prompt: &str, sample_len: usize) -> Result<()> {
+println!("in run routine");
         use std::io::Write;
         self.tokenizer.clear();
         let dtype = DType::F32;
@@ -454,7 +455,7 @@ let device = self.clone().device;
             .tokenizer
             .tokenizer()
             .encode(prompt, true)
-            .map_err(E::msg)?
+            .map_err(E::msg).unwrap()
             .get_ids()
             .to_vec();
         let mut generated_tokens = 0usize;
@@ -464,16 +465,15 @@ let device = self.clone().device;
         };
         let mut next_logits = None;
         for &t in tokens.iter() {
-            let input = Tensor::new(&[t], &self.device)?;
-//            self.model.input = Some(input);
-            let logits = self.model.forward(&input.clone())?;
+            let input = Tensor::new(&[t], &self.device).unwrap().unsqueeze(0).unwrap();
+            let logits = self.model.forward(&input.clone()).unwrap().squeeze(0).unwrap();
 
             next_logits = Some(logits);
-            if let Some(t) = self.tokenizer.next_token(t)? {
+            if let Some(t) = self.tokenizer.next_token(t).unwrap() {
                 print!("{t}")
             }
         }
-        std::io::stdout().flush()?;
+        std::io::stdout().flush().unwrap();
         self.tokenizer.clear();
 
         let start_gen = std::time::Instant::now();
@@ -482,39 +482,40 @@ let device = self.clone().device;
                 Some(logits) => logits,
                 None => anyhow::bail!("cannot work on an empty prompt"),
             };
-            let logits = logits.squeeze(0)?.to_dtype(dtype)?;
-            let logits = if self.repeat_penalty == 1. {
-                logits
-            } else {
-                let start_at = tokens.len().saturating_sub(self.repeat_last_n);
-                candle_transformers::utils::apply_repeat_penalty(
-                    &logits,
-                    self.repeat_penalty,
-                    &tokens[start_at..],
-                )?
-            };
-            let next_token = self.logits_processor.sample(&logits)?;
+            let logits = logits.squeeze(0).unwrap().to_dtype(dtype).unwrap();
+//            let logits = if self.repeat_penalty == 1. {
+//                logits
+//            } else {
+//                let start_at = tokens.len().saturating_sub(self.repeat_last_n);
+//                candle_transformers::utils::apply_repeat_penalty(
+//                    &logits,
+//                    self.repeat_penalty,
+//                    &tokens[start_at..],
+//                ).unwrap()
+//            };
+            let next_token = self.logits_processor.sample(&logits).unwrap();
             tokens.push(next_token);
             generated_tokens += 1;
             if next_token == eos_token {
+println!("EOS");
                 break;
             }
-            if let Some(t) = self.tokenizer.next_token(next_token)? {
-                print!("\t {t}");
-                std::io::stdout().flush()?;
+            if let Some(t) = self.tokenizer.next_token(next_token).unwrap() {
+                print!("{t}");
+                std::io::stdout().flush().unwrap();
             } else {
                 println!("[{next_token}]");
             }
 
-            let input = Tensor::new(&[next_token], &self.device)?;
+            let input = Tensor::new(&[next_token], &self.device).unwrap().unsqueeze(0).unwrap();
 //            self.model.input = Some(input);
-            next_logits = Some(self.model.forward(&input.clone()).unwrap())
+            next_logits = Some(self.model.forward(&input.clone()).unwrap().squeeze(0).unwrap());
         }
         let dt = start_gen.elapsed();
-        if let Some(rest) = self.tokenizer.decode_rest().map_err(E::msg)? {
+        if let Some(rest) = self.tokenizer.decode_rest().map_err(E::msg).unwrap() {
             print!("{rest}");
         }
-        std::io::stdout().flush()?;
+        std::io::stdout().flush().unwrap();
         println!(
             "\n{generated_tokens} tokens generated ({:.2} token/s)",
             generated_tokens as f64 / dt.as_secs_f64(),
