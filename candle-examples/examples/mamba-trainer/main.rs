@@ -118,14 +118,6 @@ impl Trainable for Trainer {
             let label = Tensor::new(&[label_token.clone()], &self.device)?;
 
             loss = (loss + candle_nn::loss::cross_entropy(&pred_logits, &label)?)?;
-            //loss =  candle_nn::loss::cross_entropy(&pred_logits, &label)?;
-
-            //            loss = (loss
-            //                + itert
-            //                    * candle_nn::loss::cross_entropy(&pred_logits, &label)?
-            //                        .div(&orig_token_len.clone())?)?;
-
-            //            let input = Tensor::new(&[next_token.clone()], &self.device)?;
             prediction_tokens.push(next_token.clone());
             //            self.model.input = Some(input.clone());
             //            let logits = self.model.forward(&input.clone())?;
@@ -372,77 +364,6 @@ impl Trainer {
         Ok((loss.copy()?, Some(lbfgs_state)))
     }
 
-    fn run_trained(&mut self) -> Result<()> {
-        use std::io::Write;
-        self.tokenizer.clear();
-        let dtype = DType::F32;
-        println!("data: {}", self.data.last().unwrap());
-
-        let mut tokens = self
-            .tokenizer
-            .tokenizer()
-            .encode(self.data.last().unwrap().clone(), true)
-            .map_err(E::msg)
-            .unwrap()
-            .get_ids()
-            .to_vec();
-
-        let mut generated_tokens = 0usize;
-        let eos_token = match self.tokenizer.get_token("<|endoftext|>") {
-            Some(token) => token,
-            None => anyhow::bail!("cannot find the </s> token"),
-        };
-        let mut next_logits = None;
-        for &t in tokens.iter().take(tokens.len() - 1) {
-            let input = Tensor::new(&[t], &self.device)?;
-            //            self.model.input = Some(input);
-            let logits = self.model.forward(&input.clone())?;
-
-            next_logits = Some(logits);
-            if let Some(t) = self.tokenizer.next_token(t)? {
-                print!("{t}")
-            }
-        }
-        std::io::stdout().flush()?;
-
-        let start_gen = std::time::Instant::now();
-
-        let logits = match next_logits.as_ref() {
-            Some(logits) => logits,
-            None => anyhow::bail!("cannot work on an empty prompt"),
-        };
-        let logits = logits.squeeze(0)?.to_dtype(dtype)?;
-
-        let next_token = self.logits_processor.sample(&logits)?;
-        tokens.push(next_token);
-        generated_tokens += 1;
-
-        if let Some(t) = self.tokenizer.next_token(next_token)? {
-            print!("\t {t}");
-            std::io::stdout().flush()?;
-        }
-
-        if let Some(t) = self.tokenizer.next_token(next_token)? {
-            print!("\t {t}");
-            std::io::stdout().flush()?;
-        }
-        let input = Tensor::new(&[next_token], &self.device)?;
-        //        self.model.input = Some(input);
-        next_logits = Some(self.model.forward(&input.clone()).unwrap());
-
-        let dt = start_gen.elapsed();
-
-        std::io::stdout().flush()?;
-        if let Some(rest) = self.tokenizer.decode_rest().map_err(E::msg)? {
-            print!("\t\t rest: {rest}");
-        }
-        std::io::stdout().flush()?;
-        println!(
-            "\n{generated_tokens} tokens generated ({:.2} token/s)",
-            generated_tokens as f64 / dt.as_secs_f64(),
-        );
-        Ok(())
-    }
     fn run(&mut self, prompt: &str, sample_len: usize) -> Result<()> {
         use std::io::Write;
         self.tokenizer.clear();
