@@ -318,7 +318,7 @@ impl Trainer {
 
         let params = lbfgs::ParamsLBFGS {
             //            lr: 0.1,
-            history_size: 20,
+            history_size: 10,
             line_search: Some(lbfgs::LineSearch::StrongWolfe(1e-4, 0.9, 1e-13)),
                         weight_decay: Some(1e-9), // NOTE: this must be critically dampened with the learning rate
             ..Default::default()
