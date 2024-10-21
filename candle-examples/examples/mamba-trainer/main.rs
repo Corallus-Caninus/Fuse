@@ -11,14 +11,16 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use rand::Rng;
 
-use candle_transformers::models::mamba::{Config, Model, State};
+//use candle_transformers::models::mamba::{Config, Model, State};
+mod model;
+use model::{Config, Model};
 use std::cell::Ref;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::ops::Add;
 
 use candle::Result as CResult;
-use candle::{DType, Device, Tensor, Var};
+use candle::{DType, Module, Device, Tensor, Var};
 use candle_examples::token_output_stream::TokenOutputStream;
 use candle_nn::{VarBuilder, VarMap};
 use candle_optimisers::{self, lbfgs, LossOptimizer, ModelOutcome, Trainable};
@@ -42,10 +44,10 @@ struct Trainer {
 
 impl Trainable for Trainer {
     fn loss(&mut self) -> CResult<Tensor> {
-        self.reset_state().unwrap();
         use std::io::Write;
         self.tokenizer.clear();
-        let dtype = self.model.dtype();
+//        let dtype = self.model.dtype();
+        let dtype = DType::F32;
 
         let mut tokens = self
             .tokenizer
@@ -57,7 +59,7 @@ impl Trainable for Trainer {
             .to_vec();
         let orig_token_len = tokens.len() as f32;
         let orig_token_len = Tensor::new(&[orig_token_len], &self.device)?.squeeze(0)?;
-        let mut next_logits = None;
+        let mut next_logits: Option<Tensor> = None;
         let label_token = tokens.last().unwrap();
         let mut pred_tokens = 0;
         println!("tokens len: {}", tokens.len());
@@ -72,13 +74,12 @@ impl Trainable for Trainer {
             .rev()
             .take(pred_tokens)
             .collect::<Vec<&u32>>();
-
+let mut prediction_tokens = vec![];
         for &t in tokens.iter().take(tokens.len() - pred_tokens) {
-            let input = Tensor::new(&[t], &self.device)?;
-//            self.model.input = Some(input.clone());
-            let logits = self.model.forward(&input.clone(), &mut self.clone().model.state)?;
-
-            next_logits = Some(logits);
+prediction_tokens.push(t);
+//println!("forward propagated mamba!");
+//
+//            next_logits = Some(logits);
             if let Some(t) = self.tokenizer.next_token(t)? {
                 print!("|{t}|")
             }
@@ -88,17 +89,22 @@ impl Trainable for Trainer {
 
         self.tokenizer.clear();
         let mut loss = Tensor::new(&[0.0], &self.device)?
-            .to_dtype(dtype)?
-            .squeeze(0)?;
+            .to_dtype(dtype)?.squeeze(0)?;
+//            .squeeze(0)?;
         let mut iter = 0 as f32;
         for label_token in label_tokens.into_iter().rev() {
+
+            let input = Tensor::new(prediction_tokens.as_slice(), &self.device)?.unsqueeze(0)?;
+            let logits = self.model.forward(&input.clone())?.squeeze(0)?;
+
             iter += 1.;
             let itert = Tensor::new(&[iter], &self.device)?.squeeze(0);
-            let logits = match next_logits.as_ref() {
-                Some(logits) => logits,
-                None => panic!("cannot train on an empty prompt"),
-            };
+//            let logits = match next_logits.as_ref() {
+//                Some(logits) => logits.to_dtype(dtype)?,
+//                None => panic!("cannot train on an empty prompt"),
+//            };
             let pred_logits = logits.clone().to_dtype(dtype)?;
+
 
             let next_token = self
                 .logits_processor
@@ -112,16 +118,19 @@ impl Trainable for Trainer {
 
             let label = Tensor::new(&[label_token.clone()], &self.device)?;
 
-            loss = (loss
-                + itert
-                    * candle_nn::loss::cross_entropy(&pred_logits, &label)?
-                        .div(&orig_token_len.clone())?)?;
+loss = (loss + candle_nn::loss::cross_entropy(&pred_logits, &label)?)?;
+//loss =  candle_nn::loss::cross_entropy(&pred_logits, &label)?;
 
-            let input = Tensor::new(&[next_token.clone()], &self.device)?;
 
+//            loss = (loss
+//                + itert
+//                    * candle_nn::loss::cross_entropy(&pred_logits, &label)?
+//                        .div(&orig_token_len.clone())?)?;
+
+//            let input = Tensor::new(&[next_token.clone()], &self.device)?;
+prediction_tokens.push(next_token.clone());
 //            self.model.input = Some(input.clone());
-            let logits = self.model.forward(&input.clone(), &mut self.clone().model.state)?;
-
+//            let logits = self.model.forward(&input.clone())?;
             next_logits = Some(logits);
         }
 
@@ -132,8 +141,8 @@ impl Trainable for Trainer {
             println!("nan");
             loss = Tensor::new(&[f32::MAX], &self.device)?
                 .to_dtype(dtype)
-                .unwrap()
-                .squeeze(0)?;
+                .unwrap();
+//                .squeeze(0)?;
         }
         //TODO: EXTRACT TO LBFGS
         return Ok(loss);
@@ -221,8 +230,7 @@ impl Trainer {
         let mut vm = VarMap::new();
         let mut vb = VarBuilder::from_varmap(&vm, dtype, &device);
 
-        let state = State::new(1, &read_config, dtype, &device)?;
-        let mut model = Model::new(&read_config, vb.pp("backbone"), state)?;
+        let mut model = Model::new(&read_config, vb.pp("backbone"))?;
         vm.load_multi(&filenames)?;
 
         println!("loaded the model in {:?}", start.elapsed());
@@ -253,17 +261,10 @@ impl Trainer {
             }
         }
     }
-    pub fn reset_state(&mut self) -> Result<()> {
-        let state = State::new(1, &self.config, self.dtype, &self.device)?;
-        self.model.state.hs.clear();
-        self.model.state.prev_xs.clear();
-        self.model.state = state;
-        Ok(())
-    }
 
     fn train(
         &mut self,
-        lbfgs_state: Option<lbfgs::lbfgs_state>,
+mut lbfgs_state: Option<lbfgs::lbfgs_state>,
         iter: usize,
         mut converged: bool,
     ) -> Result<(Tensor, Option<lbfgs::lbfgs_state>)> {
@@ -375,10 +376,9 @@ let device = self.clone().device;
     }
 
     fn run_trained(&mut self) -> Result<()> {
-        self.reset_state().unwrap();
         use std::io::Write;
         self.tokenizer.clear();
-        let dtype = self.model.dtype();
+        let dtype = DType::F32;
         println!("data: {}", self.data.last().unwrap());
 
         let mut tokens = self
@@ -399,7 +399,7 @@ let device = self.clone().device;
         for &t in tokens.iter().take(tokens.len() - 1) {
             let input = Tensor::new(&[t], &self.device)?;
 //            self.model.input = Some(input);
-            let logits = self.model.forward(&input.clone(), &mut self.clone().model.state)?;
+            let logits = self.model.forward(&input.clone())?;
 
             next_logits = Some(logits);
             if let Some(t) = self.tokenizer.next_token(t)? {
@@ -431,7 +431,7 @@ let device = self.clone().device;
         }
         let input = Tensor::new(&[next_token], &self.device)?;
 //        self.model.input = Some(input);
-        next_logits = Some(self.model.forward(&input.clone(), &mut self.clone().model.state)?);
+        next_logits = Some(self.model.forward(&input.clone()).unwrap());
 
         let dt = start_gen.elapsed();
 
@@ -448,9 +448,8 @@ let device = self.clone().device;
     }
     fn run(&mut self, prompt: &str, sample_len: usize) -> Result<()> {
         use std::io::Write;
-        self.reset_state();
         self.tokenizer.clear();
-        let dtype = self.model.dtype();
+        let dtype = DType::F32;
         let mut tokens = self
             .tokenizer
             .tokenizer()
@@ -467,7 +466,7 @@ let device = self.clone().device;
         for &t in tokens.iter() {
             let input = Tensor::new(&[t], &self.device)?;
 //            self.model.input = Some(input);
-            let logits = self.model.forward(&input.clone(), &mut self.clone().model.state)?;
+            let logits = self.model.forward(&input.clone())?;
 
             next_logits = Some(logits);
             if let Some(t) = self.tokenizer.next_token(t)? {
@@ -509,7 +508,7 @@ let device = self.clone().device;
 
             let input = Tensor::new(&[next_token], &self.device)?;
 //            self.model.input = Some(input);
-            next_logits = Some(self.model.forward(&input.clone(), &mut self.clone().model.state)?)
+            next_logits = Some(self.model.forward(&input.clone()).unwrap())
         }
         let dt = start_gen.elapsed();
         if let Some(rest) = self.tokenizer.decode_rest().map_err(E::msg)? {
