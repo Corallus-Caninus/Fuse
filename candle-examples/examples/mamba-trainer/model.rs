@@ -8,10 +8,10 @@ use candle_transformers::models::with_tracing::{linear, linear_no_bias, Linear};
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Config {
-pub    d_model: usize,
-pub    n_layer: usize,
+    pub d_model: usize,
+    pub n_layer: usize,
     pub vocab_size: usize,
-pub     pad_vocab_size_multiple: usize,
+    pub pad_vocab_size_multiple: usize,
 }
 
 impl Config {

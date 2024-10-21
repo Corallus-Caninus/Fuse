@@ -20,7 +20,7 @@ use std::collections::VecDeque;
 use std::ops::Add;
 
 use candle::Result as CResult;
-use candle::{DType, Module, Device, Tensor, Var};
+use candle::{DType, Device, Module, Tensor, Var};
 use candle_examples::token_output_stream::TokenOutputStream;
 use candle_nn::{VarBuilder, VarMap};
 use candle_optimisers::{self, lbfgs, LossOptimizer, ModelOutcome, Trainable};
@@ -46,7 +46,7 @@ impl Trainable for Trainer {
     fn loss(&mut self) -> CResult<Tensor> {
         use std::io::Write;
         self.tokenizer.clear();
-//        let dtype = self.model.dtype();
+        //        let dtype = self.model.dtype();
         let dtype = DType::F32;
 
         let mut tokens = self
@@ -74,12 +74,12 @@ impl Trainable for Trainer {
             .rev()
             .take(pred_tokens)
             .collect::<Vec<&u32>>();
-let mut prediction_tokens = vec![];
+        let mut prediction_tokens = vec![];
         for &t in tokens.iter().take(tokens.len() - pred_tokens) {
-prediction_tokens.push(t);
-//println!("forward propagated mamba!");
-//
-//            next_logits = Some(logits);
+            prediction_tokens.push(t);
+            //println!("forward propagated mamba!");
+            //
+            //            next_logits = Some(logits);
             if let Some(t) = self.tokenizer.next_token(t)? {
                 print!("|{t}|")
             }
@@ -89,22 +89,21 @@ prediction_tokens.push(t);
 
         self.tokenizer.clear();
         let mut loss = Tensor::new(&[0.0], &self.device)?
-            .to_dtype(dtype)?.squeeze(0)?;
-//            .squeeze(0)?;
+            .to_dtype(dtype)?
+            .squeeze(0)?;
+        //            .squeeze(0)?;
         let mut iter = 0 as f32;
         for label_token in label_tokens.into_iter().rev() {
-
             let input = Tensor::new(prediction_tokens.as_slice(), &self.device)?.unsqueeze(0)?;
             let logits = self.model.forward(&input.clone())?.squeeze(0)?;
 
             iter += 1.;
             let itert = Tensor::new(&[iter], &self.device)?.squeeze(0);
-//            let logits = match next_logits.as_ref() {
-//                Some(logits) => logits.to_dtype(dtype)?,
-//                None => panic!("cannot train on an empty prompt"),
-//            };
+            //            let logits = match next_logits.as_ref() {
+            //                Some(logits) => logits.to_dtype(dtype)?,
+            //                None => panic!("cannot train on an empty prompt"),
+            //            };
             let pred_logits = logits.clone().to_dtype(dtype)?;
-
 
             let next_token = self
                 .logits_processor
@@ -118,19 +117,18 @@ prediction_tokens.push(t);
 
             let label = Tensor::new(&[label_token.clone()], &self.device)?;
 
-loss = (loss + candle_nn::loss::cross_entropy(&pred_logits, &label)?)?;
-//loss =  candle_nn::loss::cross_entropy(&pred_logits, &label)?;
+            loss = (loss + candle_nn::loss::cross_entropy(&pred_logits, &label)?)?;
+            //loss =  candle_nn::loss::cross_entropy(&pred_logits, &label)?;
 
+            //            loss = (loss
+            //                + itert
+            //                    * candle_nn::loss::cross_entropy(&pred_logits, &label)?
+            //                        .div(&orig_token_len.clone())?)?;
 
-//            loss = (loss
-//                + itert
-//                    * candle_nn::loss::cross_entropy(&pred_logits, &label)?
-//                        .div(&orig_token_len.clone())?)?;
-
-//            let input = Tensor::new(&[next_token.clone()], &self.device)?;
-prediction_tokens.push(next_token.clone());
-//            self.model.input = Some(input.clone());
-//            let logits = self.model.forward(&input.clone())?;
+            //            let input = Tensor::new(&[next_token.clone()], &self.device)?;
+            prediction_tokens.push(next_token.clone());
+            //            self.model.input = Some(input.clone());
+            //            let logits = self.model.forward(&input.clone())?;
             next_logits = Some(logits);
         }
 
@@ -142,7 +140,7 @@ prediction_tokens.push(next_token.clone());
             loss = Tensor::new(&[f32::MAX], &self.device)?
                 .to_dtype(dtype)
                 .unwrap();
-//                .squeeze(0)?;
+            //                .squeeze(0)?;
         }
         //TODO: EXTRACT TO LBFGS
         return Ok(loss);
@@ -264,13 +262,13 @@ impl Trainer {
 
     fn train(
         &mut self,
-mut lbfgs_state: Option<lbfgs::lbfgs_state>,
+        mut lbfgs_state: Option<lbfgs::lbfgs_state>,
         iter: usize,
         mut converged: bool,
     ) -> Result<(Tensor, Option<lbfgs::lbfgs_state>)> {
         let mut vars = self.vars.all_vars();
         let mut loss = self.loss().unwrap();
-let device = self.clone().device;
+        let device = self.clone().device;
 
         println!("begin training..");
 
@@ -284,7 +282,7 @@ let device = self.clone().device;
         let mut prev_loss = f32::MAX;
         let mut prev_loss = Tensor::new(&[prev_loss], &device)?;
 
-        let mut lbfgs_opt = lbfgs::Lbfgs::new(self.vars.all_vars(), params,  self)?;
+        let mut lbfgs_opt = lbfgs::Lbfgs::new(self.vars.all_vars(), params, self)?;
         if lbfgs_state.is_some() {
             println!("loading Hessian..");
             lbfgs_opt.load_state(lbfgs_state.unwrap());
@@ -335,39 +333,38 @@ let device = self.clone().device;
         //TODO: EXTRACT TO LBFGS
         if reset {
             println!("RESET");
-                    let mut rng = rand::thread_rng();
+            let mut rng = rand::thread_rng();
 
-                    let mut shuffled_iterable = vars;
-                    let num_entries = (shuffled_iterable.len() as f32 * 0.9) as usize;
-                    shuffled_iterable.shuffle(&mut rng);
+            let mut shuffled_iterable = vars;
+            let num_entries = (shuffled_iterable.len() as f32 * 0.9) as usize;
+            shuffled_iterable.shuffle(&mut rng);
 
-                    shuffled_iterable
-                        .into_iter()
-                        .take(num_entries)
-                        .for_each(|mut x| {
-                            let mut vec_tens = x.flatten_all().unwrap().to_vec1::<f32>().unwrap();
-                            for i in 0..vec_tens.len() * 0.1 as usize {
-                                let first_idx = rng.gen_range(0..=vec_tens.len() - 1);
+            shuffled_iterable
+                .into_iter()
+                .take(num_entries)
+                .for_each(|mut x| {
+                    let mut vec_tens = x.flatten_all().unwrap().to_vec1::<f32>().unwrap();
+                    for i in 0..vec_tens.len() * 0.1 as usize {
+                        let first_idx = rng.gen_range(0..=vec_tens.len() - 1);
 
-                                let random_float: f32 = rng.gen_range(-1.0..=1.0);
+                        let random_float: f32 = rng.gen_range(-1.0..=1.0);
 
-                                vec_tens[first_idx] = random_float;
-                            }
-                            let sparse =
-                                &Tensor::from_vec(vec_tens, x.shape(), &device).unwrap();
+                        vec_tens[first_idx] = random_float;
+                    }
+                    let sparse = &Tensor::from_vec(vec_tens, x.shape(), &device).unwrap();
 
-                            x.set(sparse);
-                            x = Var::from_tensor(sparse).unwrap();
-                            println!("shape: {:?}", x.as_tensor());
-                        });
+                    x.set(sparse);
+                    x = Var::from_tensor(sparse).unwrap();
+                    println!("shape: {:?}", x.as_tensor());
+                });
 
-                    lbfgs_opt.s_hist.clear();
-                    lbfgs_opt.last_grad = None;
-                    lbfgs_opt.last_step = None;
-                    lbfgs_opt.next_grad = None;
-                    lbfgs_opt.first = true;
+            lbfgs_opt.s_hist.clear();
+            lbfgs_opt.last_grad = None;
+            lbfgs_opt.last_step = None;
+            lbfgs_opt.next_grad = None;
+            lbfgs_opt.first = true;
 
-                    println!("-------------------------------------CLEARING Stuck Hessian {}..----------------------------------------------------", 0.);
+            println!("-------------------------------------CLEARING Stuck Hessian {}..----------------------------------------------------", 0.);
         }
         //TODO: EXTRACT TO LBFGS
         let mut lbfgs_state = lbfgs_opt.save_state();
@@ -398,7 +395,7 @@ let device = self.clone().device;
         let mut next_logits = None;
         for &t in tokens.iter().take(tokens.len() - 1) {
             let input = Tensor::new(&[t], &self.device)?;
-//            self.model.input = Some(input);
+            //            self.model.input = Some(input);
             let logits = self.model.forward(&input.clone())?;
 
             next_logits = Some(logits);
@@ -430,7 +427,7 @@ let device = self.clone().device;
             std::io::stdout().flush()?;
         }
         let input = Tensor::new(&[next_token], &self.device)?;
-//        self.model.input = Some(input);
+        //        self.model.input = Some(input);
         next_logits = Some(self.model.forward(&input.clone()).unwrap());
 
         let dt = start_gen.elapsed();
@@ -454,7 +451,8 @@ let device = self.clone().device;
             .tokenizer
             .tokenizer()
             .encode(prompt, true)
-            .map_err(E::msg).unwrap()
+            .map_err(E::msg)
+            .unwrap()
             .get_ids()
             .to_vec();
         let mut generated_tokens = 0usize;
@@ -464,8 +462,16 @@ let device = self.clone().device;
         };
         let mut next_logits = None;
         for &t in tokens.iter() {
-            let input = Tensor::new(&[t], &self.device).unwrap().unsqueeze(0).unwrap();
-            let logits = self.model.forward(&input.clone()).unwrap().squeeze(0).unwrap();
+            let input = Tensor::new(&[t], &self.device)
+                .unwrap()
+                .unsqueeze(0)
+                .unwrap();
+            let logits = self
+                .model
+                .forward(&input.clone())
+                .unwrap()
+                .squeeze(0)
+                .unwrap();
 
             next_logits = Some(logits);
             if let Some(t) = self.tokenizer.next_token(t).unwrap() {
@@ -482,21 +488,21 @@ let device = self.clone().device;
                 None => anyhow::bail!("cannot work on an empty prompt"),
             };
             let logits = logits.squeeze(0).unwrap().to_dtype(dtype).unwrap();
-//            let logits = if self.repeat_penalty == 1. {
-//                logits
-//            } else {
-//                let start_at = tokens.len().saturating_sub(self.repeat_last_n);
-//                candle_transformers::utils::apply_repeat_penalty(
-//                    &logits,
-//                    self.repeat_penalty,
-//                    &tokens[start_at..],
-//                ).unwrap()
-//            };
+            //            let logits = if self.repeat_penalty == 1. {
+            //                logits
+            //            } else {
+            //                let start_at = tokens.len().saturating_sub(self.repeat_last_n);
+            //                candle_transformers::utils::apply_repeat_penalty(
+            //                    &logits,
+            //                    self.repeat_penalty,
+            //                    &tokens[start_at..],
+            //                ).unwrap()
+            //            };
             let next_token = self.logits_processor.sample(&logits).unwrap();
             tokens.push(next_token);
             generated_tokens += 1;
             if next_token == eos_token {
-println!("EOS");
+                println!("EOS");
                 break;
             }
             if let Some(t) = self.tokenizer.next_token(next_token).unwrap() {
@@ -506,8 +512,17 @@ println!("EOS");
                 println!("[{next_token}]");
             }
 
-            let input = Tensor::new(&[next_token], &self.device).unwrap().unsqueeze(0).unwrap();
-            next_logits = Some(self.model.forward(&input.clone()).unwrap().squeeze(0).unwrap());
+            let input = Tensor::new(&[next_token], &self.device)
+                .unwrap()
+                .unsqueeze(0)
+                .unwrap();
+            next_logits = Some(
+                self.model
+                    .forward(&input.clone())
+                    .unwrap()
+                    .squeeze(0)
+                    .unwrap(),
+            );
         }
         let dt = start_gen.elapsed();
         if let Some(rest) = self.tokenizer.decode_rest().map_err(E::msg).unwrap() {
@@ -630,9 +645,9 @@ fn lines_from_file(filename: impl AsRef<Path>) -> Vec<String> {
 }
 
 fn main() -> Result<()> {
-    let mut prompts = lines_from_file("TEXT.txt");
+    let mut prompts = lines_from_file("candle-examples/examples/mamba-trainer/RustLang.txt");
     let mut opt_state = None;
-let mut i = 1;
+    let mut i = 1;
     let mut converged = false;
     let mut learner = Trainer::new()?;
     learner.run("mamba is the", 20);
