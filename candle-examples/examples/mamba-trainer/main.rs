@@ -75,8 +75,8 @@ impl Trainable for Trainer {
 
         for &t in tokens.iter().take(tokens.len() - pred_tokens) {
             let input = Tensor::new(&[t], &self.device)?;
-            self.model.input = Some(input.clone());
-            let logits = self.model.forward_state()?;
+//            self.model.input = Some(input.clone());
+            let logits = self.model.forward(&input.clone(), &mut self.clone().model.state)?;
 
             next_logits = Some(logits);
             if let Some(t) = self.tokenizer.next_token(t)? {
@@ -119,15 +119,15 @@ impl Trainable for Trainer {
 
             let input = Tensor::new(&[next_token.clone()], &self.device)?;
 
-            self.model.input = Some(input.clone());
-            let logits = self.model.forward_state()?;
+//            self.model.input = Some(input.clone());
+            let logits = self.model.forward(&input.clone(), &mut self.clone().model.state)?;
 
             next_logits = Some(logits);
         }
 
         tokens.clear();
         self.tokenizer.clear();
-//TODO: EXTRACT TO LBFGS
+        //TODO: EXTRACT TO LBFGS
         if loss.as_ref().clone().to_scalar::<f32>()?.is_nan() {
             println!("nan");
             loss = Tensor::new(&[f32::MAX], &self.device)?
@@ -135,7 +135,7 @@ impl Trainable for Trainer {
                 .unwrap()
                 .squeeze(0)?;
         }
-//TODO: EXTRACT TO LBFGS
+        //TODO: EXTRACT TO LBFGS
         return Ok(loss);
     }
 }
@@ -267,8 +267,9 @@ impl Trainer {
         iter: usize,
         mut converged: bool,
     ) -> Result<(Tensor, Option<lbfgs::lbfgs_state>)> {
-        let mut vars = self.vars.all_vars().clone();
-        let mut loss = self.loss().unwrap().clone();
+        let mut vars = self.vars.all_vars();
+        let mut loss = self.loss().unwrap();
+let device = self.clone().device;
 
         println!("begin training..");
 
@@ -278,26 +279,21 @@ impl Trainer {
             weight_decay: Some(1e-9),
             ..Default::default()
         };
-        let selfi = &mut self.clone();
-        let mut lbfgs_opt = lbfgs::Lbfgs::new(vars, params, selfi)?;
+        let mut reset = false;
+        let mut prev_loss = f32::MAX;
+        let mut prev_loss = Tensor::new(&[prev_loss], &device)?;
+
+        let mut lbfgs_opt = lbfgs::Lbfgs::new(self.vars.all_vars(), params,  self)?;
         if lbfgs_state.is_some() {
             println!("loading Hessian..");
             lbfgs_opt.load_state(lbfgs_state.unwrap());
         }
-        let mut reset = false;
-        let mut hessian_pop = false;
-        let mut vanished = false;
-        let mut prev_loss = f32::MAX;
-        let mut prev_loss = Tensor::new(&[prev_loss], &self.device)?;
-
         for i in 0..1 {
             let res = lbfgs_opt.backward_step(&mut loss).unwrap();
             match res {
                 ModelOutcome::Converged(new_loss, _) => {
                     loss = new_loss.clone();
 
-                    hessian_pop = true;
-                    vanished = true;
                     reset = true;
                     break;
                 }
@@ -305,8 +301,6 @@ impl Trainer {
                     loss = new_loss.clone();
                     reset = true;
 
-                    hessian_pop = true;
-                    vanished = true;
                     println!("GRAD CONVERGED");
 
                     break;
@@ -337,14 +331,12 @@ impl Trainer {
         println!("s_hist: {}", lbfgs_opt.s_hist.len());
         converged = false;
 
-//TODO: EXTRACT TO LBFGS
+        //TODO: EXTRACT TO LBFGS
         if reset {
             println!("RESET");
-            if vanished {
-                if hessian_pop {
                     let mut rng = rand::thread_rng();
 
-                    let mut shuffled_iterable = self.vars.all_vars();
+                    let mut shuffled_iterable = vars;
                     let num_entries = (shuffled_iterable.len() as f32 * 0.9) as usize;
                     shuffled_iterable.shuffle(&mut rng);
 
@@ -361,7 +353,7 @@ impl Trainer {
                                 vec_tens[first_idx] = random_float;
                             }
                             let sparse =
-                                &Tensor::from_vec(vec_tens, x.shape(), &self.device).unwrap();
+                                &Tensor::from_vec(vec_tens, x.shape(), &device).unwrap();
 
                             x.set(sparse);
                             x = Var::from_tensor(sparse).unwrap();
@@ -375,10 +367,8 @@ impl Trainer {
                     lbfgs_opt.first = true;
 
                     println!("-------------------------------------CLEARING Stuck Hessian {}..----------------------------------------------------", 0.);
-                }
-            }
         }
-//TODO: EXTRACT TO LBFGS
+        //TODO: EXTRACT TO LBFGS
         let mut lbfgs_state = lbfgs_opt.save_state();
 
         Ok((loss.copy()?, Some(lbfgs_state)))
@@ -408,8 +398,8 @@ impl Trainer {
         let mut next_logits = None;
         for &t in tokens.iter().take(tokens.len() - 1) {
             let input = Tensor::new(&[t], &self.device)?;
-            self.model.input = Some(input);
-            let logits = self.model.forward_state()?;
+//            self.model.input = Some(input);
+            let logits = self.model.forward(&input.clone(), &mut self.clone().model.state)?;
 
             next_logits = Some(logits);
             if let Some(t) = self.tokenizer.next_token(t)? {
@@ -440,8 +430,8 @@ impl Trainer {
             std::io::stdout().flush()?;
         }
         let input = Tensor::new(&[next_token], &self.device)?;
-        self.model.input = Some(input);
-        next_logits = Some(self.model.forward_state()?);
+//        self.model.input = Some(input);
+        next_logits = Some(self.model.forward(&input.clone(), &mut self.clone().model.state)?);
 
         let dt = start_gen.elapsed();
 
@@ -476,8 +466,8 @@ impl Trainer {
         let mut next_logits = None;
         for &t in tokens.iter() {
             let input = Tensor::new(&[t], &self.device)?;
-            self.model.input = Some(input);
-            let logits = self.model.forward_state()?;
+//            self.model.input = Some(input);
+            let logits = self.model.forward(&input.clone(), &mut self.clone().model.state)?;
 
             next_logits = Some(logits);
             if let Some(t) = self.tokenizer.next_token(t)? {
@@ -518,8 +508,8 @@ impl Trainer {
             }
 
             let input = Tensor::new(&[next_token], &self.device)?;
-            self.model.input = Some(input);
-            next_logits = Some(self.model.forward_state()?)
+//            self.model.input = Some(input);
+            next_logits = Some(self.model.forward(&input.clone(), &mut self.clone().model.state)?)
         }
         let dt = start_gen.elapsed();
         if let Some(rest) = self.tokenizer.decode_rest().map_err(E::msg)? {
@@ -644,24 +634,18 @@ fn lines_from_file(filename: impl AsRef<Path>) -> Vec<String> {
 fn main() -> Result<()> {
     let mut prompts = lines_from_file("TEXT.txt");
     let mut opt_state = None;
-
-    let mut i = 1;
+let mut i = 1;
     let mut converged = false;
     let mut learner = Trainer::new()?;
     learner.run("mamba is the", 20);
-    let mut model = learner.model.clone();
-    let mut varmap = learner.vars.clone();
     for mut j in 1..11 * prompts.len() {
         let mut learner = Trainer::new()?;
         learner.add_dataset(prompts.clone());
-        learner.model = model.clone();
-        learner.vars = varmap.clone();
         learner.data.rotate_left(j);
         opt_state = learner.train(opt_state.clone(), 10, converged)?.1;
         i = j;
         learner.run("mamba is a", 20);
         println!("done training!");
-
         learner.run("Rust is  ", 20);
     }
 
